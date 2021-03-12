@@ -1,0 +1,101 @@
+#!/usr/bin/env python
+"""
+Calibrate odocmetry with data from a rosbag file
+"""
+from argparse import ArgumentParser
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+import rosbag
+import scipy.optimize
+from angles import shortest_angular_distance
+from ruvu_odometry_calibration.odometry_calibration import to_matrix, pairs, inverse_odometry, odometry
+from ruvu_odometry_calibration.tf2_rosbag import BagBuffer
+from tf.transformations import inverse_matrix, translation_from_matrix, \
+    euler_from_matrix, identity_matrix
+from tf2_ros import ExtrapolationException
+
+
+@dataclass
+class DataPoint:
+    timestamp: Any
+    ground_truth: Any
+    measurement: Any
+
+
+def f(data, x):
+    errs = []
+    for d1, d2 in pairs(data):
+        linear, angular = inverse_odometry(d1.measurement, d2.measurement)
+
+        # model parameters
+        wheel_separation_multiplier = x[0]
+        wheel_radius_multiplier = x[1]
+
+        linear2 = linear * wheel_radius_multiplier
+        angular2 = angular * wheel_radius_multiplier / wheel_separation_multiplier
+
+        new_pos = odometry(identity_matrix(), linear2, angular2)
+
+        # x and y error
+        delta_ground_truth = np.dot(inverse_matrix(d1.ground_truth), d2.ground_truth)
+        err_2d = translation_from_matrix(delta_ground_truth)[:2] - translation_from_matrix(new_pos)[:2]
+
+        # rotation error
+        err_rot = shortest_angular_distance(euler_from_matrix(delta_ground_truth)[2], euler_from_matrix(new_pos)[2])
+        errs.append((err_2d[0], err_2d[1], err_rot))
+
+    errs = np.array(errs)
+    print('err:', np.linalg.norm(errs), x[0], x[1])
+    return errs
+
+
+def load_data(bag):
+    bag_transformer = BagBuffer(bag)
+
+    data = []
+    for _, msg, _ in bag.read_messages(topics=['/scan']):
+        try:
+            ground_truth = bag_transformer.lookup_transform('map', 'base_link', msg.header.stamp)
+            measurement = bag_transformer.lookup_transform('odom', 'base_link', msg.header.stamp)
+        except ExtrapolationException:
+            continue
+        ground_truth = to_matrix(ground_truth)
+        measurement = to_matrix(measurement)
+        data.append(DataPoint(timestamp=msg.header.stamp, ground_truth=ground_truth, measurement=measurement))
+
+    print('loaded', len(data), 'data points')
+    newdata = [data[0]]
+    for d in data:
+        if np.linalg.norm(
+                translation_from_matrix(d.measurement) - translation_from_matrix(newdata[-1].measurement)) > 0.1:
+            newdata.append(d)
+    data = newdata
+    # data = data[::5]
+    print('using', len(data), 'data points')
+
+    return data
+
+
+def main(bagfile):
+    print('Loading bagfile:', bagfile)
+    with rosbag.Bag(bagfile) as bag:
+        data = load_data(bag)
+
+    bounds = (0.5, 2)
+    result = scipy.optimize.least_squares(lambda x: np.ndarray.flatten(f(data, x)), [1, 1],
+                                          bounds=list(zip(bounds, bounds)))
+    del result['fun']
+    del result['jac']
+    print(result)
+    print('wheel_separation_multiplier', result.x[0])
+    print('wheel_radius_multiplier', result.x[1])
+
+
+if __name__ == '__main__':
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument('bagfile', help='input bagfile')
+
+    args = parser.parse_args()
+    main(**vars(args))
