@@ -1,6 +1,11 @@
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 from angles import normalize_angle
+from angles import shortest_angular_distance
 from numpy import sin, cos
+from tf.transformations import inverse_matrix, identity_matrix
 from tf.transformations import translation_matrix, quaternion_matrix, translation_from_matrix, \
     euler_from_matrix, euler_matrix
 
@@ -80,3 +85,44 @@ def odometry(position, linear, angular):
     t = translation_matrix((x, y, 0))
     r = euler_matrix(0, 0, heading)
     return np.dot(t, r)
+
+
+@dataclass
+class DataPoint:
+    timestamp: Any
+    ground_truth: Any
+    measurement: Any
+
+
+@dataclass
+class Parameters:
+    wheel_separation_multiplier: float
+    wheel_radius_multiplier: float
+
+
+def loss(data, parameters):
+    """
+    Loss function
+
+    Given a bunch of data, and a set of parameters, return residual errors. Row in the residuals is a tuple of errors
+    (x, y, theta)
+    """
+    errs = []
+    for d1, d2 in pairs(data):
+        linear, angular = inverse_odometry(d1.measurement, d2.measurement)
+
+        linear2 = linear * parameters.wheel_radius_multiplier
+        angular2 = angular * parameters.wheel_radius_multiplier / parameters.wheel_separation_multiplier
+
+        new_pos = odometry(identity_matrix(), linear2, angular2)
+
+        # x and y error
+        delta_ground_truth = np.dot(inverse_matrix(d1.ground_truth), d2.ground_truth)
+        err_2d = translation_from_matrix(delta_ground_truth)[:2] - translation_from_matrix(new_pos)[:2]
+
+        # rotation error
+        err_rot = shortest_angular_distance(euler_from_matrix(delta_ground_truth)[2], euler_from_matrix(new_pos)[2])
+        errs.append((err_2d[0], err_2d[1], err_rot))
+
+    errs = np.array(errs)
+    return errs

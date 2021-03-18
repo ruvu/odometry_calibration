@@ -3,52 +3,14 @@
 Calibrate odocmetry with data from a rosbag file
 """
 from argparse import ArgumentParser
-from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 import rosbag
 import scipy.optimize
-from angles import shortest_angular_distance
-from ruvu_odometry_calibration.odometry_calibration import to_matrix, pairs, inverse_odometry, odometry
+from ruvu_odometry_calibration.odometry_calibration import to_matrix, DataPoint, Parameters, loss
 from ruvu_odometry_calibration.tf2_rosbag import BagBuffer
-from tf.transformations import inverse_matrix, translation_from_matrix, \
-    euler_from_matrix, identity_matrix
+from tf.transformations import translation_from_matrix
 from tf2_ros import ExtrapolationException
-
-
-@dataclass
-class DataPoint:
-    timestamp: Any
-    ground_truth: Any
-    measurement: Any
-
-
-def f(data, x):
-    errs = []
-    for d1, d2 in pairs(data):
-        linear, angular = inverse_odometry(d1.measurement, d2.measurement)
-
-        # model parameters
-        wheel_separation_multiplier = x[0]
-        wheel_radius_multiplier = x[1]
-
-        linear2 = linear * wheel_radius_multiplier
-        angular2 = angular * wheel_radius_multiplier / wheel_separation_multiplier
-
-        new_pos = odometry(identity_matrix(), linear2, angular2)
-
-        # x and y error
-        delta_ground_truth = np.dot(inverse_matrix(d1.ground_truth), d2.ground_truth)
-        err_2d = translation_from_matrix(delta_ground_truth)[:2] - translation_from_matrix(new_pos)[:2]
-
-        # rotation error
-        err_rot = shortest_angular_distance(euler_from_matrix(delta_ground_truth)[2], euler_from_matrix(new_pos)[2])
-        errs.append((err_2d[0], err_2d[1], err_rot))
-
-    errs = np.array(errs)
-    print('err:', np.linalg.norm(errs), x[0], x[1])
-    return errs
 
 
 def load_data(bag):
@@ -83,9 +45,14 @@ def main(bagfile):
     with rosbag.Bag(bagfile) as bag:
         data = load_data(bag)
 
+    def f(x):
+        parameters = Parameters(x[0], x[1])
+        errs = loss(data, parameters)
+        print('err:', np.linalg.norm(errs), parameters)
+        return np.ndarray.flatten(errs)
+
     bounds = (0.5, 2)
-    result = scipy.optimize.least_squares(lambda x: np.ndarray.flatten(f(data, x)), [1, 1],
-                                          bounds=list(zip(bounds, bounds)))
+    result = scipy.optimize.least_squares(f, [1, 1], bounds=list(zip(bounds, bounds)))
     del result['fun']
     del result['jac']
     print(result)
