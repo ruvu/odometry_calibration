@@ -5,9 +5,11 @@ import numpy as np
 from angles import normalize_angle
 from angles import shortest_angular_distance
 from numpy import sin, cos
+from ruvu_odometry_calibration.tf2_rosbag import BagBuffer
 from tf.transformations import inverse_matrix, identity_matrix
 from tf.transformations import translation_matrix, quaternion_matrix, translation_from_matrix, \
     euler_from_matrix, euler_matrix
+from tf2_ros import ExtrapolationException
 
 
 def to_matrix(data):
@@ -92,6 +94,25 @@ class DataPoint:
     timestamp: Any
     ground_truth: Any
     measurement: Any
+
+
+def bag_to_datapoints(bag):
+    """
+    Load all data of a bagfile into a list of DataPoints
+    """
+    bag_transformer = BagBuffer(bag)
+
+    data = []
+    for _, msg, _ in bag.read_messages(topics=['/scan']):
+        try:
+            ground_truth = bag_transformer.lookup_transform('map', 'base_link', msg.header.stamp)
+            measurement = bag_transformer.lookup_transform('odom', 'base_link', msg.header.stamp)
+        except ExtrapolationException:
+            continue
+        ground_truth = to_matrix(ground_truth)
+        measurement = to_matrix(measurement)
+        data.append(DataPoint(timestamp=msg.header.stamp, ground_truth=ground_truth, measurement=measurement))
+    return data
 
 
 @dataclass
