@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(ruvu_odometry_calibration)
 
-find_package(catkin REQUIRED)
+find_package(catkin REQUIRED COMPONENTS
+  rosbag
+  sensor_msgs
+  tf2_ros
+)
 find_package(Ceres REQUIRED)
 
 catkin_python_setup()
@@ -25,6 +29,13 @@ include_directories(
 
 add_executable(calibrate++ src/main.cpp)
 target_link_libraries(calibrate++
+  ${catkin_LIBRARIES}
+  ${CERES_LIBRARIES}
+)
+
+add_executable(ceres_example src/ceres_example.cpp)
+target_link_libraries(ceres_example
+  ${catkin_LIBRARIES}
   ${CERES_LIBRARIES}
 )
 
@@ -32,7 +43,7 @@ target_link_libraries(calibrate++
 ## Install ##
 #############
 
-install(TARGETS calibrate++
+install(TARGETS calibrate++ ceres_example
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

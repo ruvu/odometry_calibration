@@ -1,42 +1,61 @@
-#include "ceres/ceres.h"
-#include "glog/logging.h"
-using ceres::AutoDiffCostFunction;
-using ceres::CostFunction;
-using ceres::Problem;
-using ceres::Solve;
-using ceres::Solver;
-// A templated cost functor that implements the residual r = 10 -
-// x. The method operator() is templated so that we can then use an
-// automatic differentiation wrapper around it to generate its
-// derivatives.
-struct CostFunctor
+#include <cstdio>
+#include <rosbag/bag.h>
+#include <rosbag/view.h>
+#include <sensor_msgs/LaserScan.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_msgs/TFMessage.h>
+
+ros::Duration duration_from_bag(const rosbag::Bag& bag)
 {
-  template <typename T>
-  bool operator()(const T* const x, T* residual) const
+  std::vector<ros::Time> ts;
+  for (const auto& msg : rosbag::View(bag, rosbag::TopicQuery("/scan")))
   {
-    residual[0] = 10.0 - x[0];
-    return true;
+    auto scan = msg.instantiate<sensor_msgs::LaserScan>();
+    if (scan == nullptr)
+      throw std::runtime_error("Received scan message with the wrong type");
+    ts.push_back(scan->header.stamp);
+  }
+
+  printf("Loaded %zu scans", ts.size());
+  if (!ts.size())
+    throw std::runtime_error("Can't find any scans in the bagfile");
+
+  return ts.back() - ts.front();
+}
+
+class BagBuffer : tf2_ros::Buffer
+{
+public:
+  BagBuffer(const rosbag::Bag& bag) : Buffer(duration_from_bag(bag))
+  {
+    for (const auto& msg : rosbag::View(bag, rosbag::TopicQuery("/tf")))
+    {
+      auto tfs = msg.instantiate<tf2_msgs::TFMessage>();
+      if (tfs == nullptr)
+        throw std::runtime_error("Received tf message with the wrong type");
+      for (auto& tf : tfs->transforms)
+      {
+        this->setTransform(tf, "bagfile");
+      }
+    }
   }
 };
+
 int main(int argc, char** argv)
 {
-  google::InitGoogleLogging(argv[0]);
-  // The variable to solve for with its initial value. It will be
-  // mutated in place by the solver.
-  double x = 0.5;
-  const double initial_x = x;
-  // Build the problem.
-  Problem problem;
-  // Set up the only cost function (also known as residual). This uses
-  // auto-differentiation to obtain the derivative (jacobian).
-  CostFunction* cost_function = new AutoDiffCostFunction<CostFunctor, 1, 1>(new CostFunctor);
-  problem.AddResidualBlock(cost_function, nullptr, &x);
-  // Run the solver!
-  Solver::Options options;
-  options.minimizer_progress_to_stdout = true;
-  Solver::Summary summary;
-  Solve(options, &problem, &summary);
-  std::cout << summary.BriefReport() << "\n";
-  std::cout << "x : " << initial_x << " -> " << x << "\n";
+  if (argc != 2)
+  {
+    printf("usage: %s BAGFILE", argv[0]);
+    return 1;
+  }
+
+  printf("loading %s", argv[1]);
+  rosbag::Bag bag;
+  bag.open(argv[1], rosbag::bagmode::Read);
+
+  BagBuffer buffer(bag);
+
+  bag.close();
+
   return 0;
 }
