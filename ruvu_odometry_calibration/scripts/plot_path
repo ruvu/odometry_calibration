@@ -1,0 +1,39 @@
+#!/usr/bin/env python
+from argparse import ArgumentParser
+
+import matplotlib.pyplot as plt
+import numpy as np
+import rosbag
+from ruvu_odometry_calibration.odometry_calibration import bag_to_datapoints
+from tf.transformations import translation_from_matrix
+
+
+def main(bagfile):
+    print('Loading bagfile:', bagfile)
+    with rosbag.Bag(bagfile) as bag:
+        data = bag_to_datapoints(bag)
+
+    ground_truth = np.array([translation_from_matrix(d.ground_truth) for d in data])
+    measurement = np.array([translation_from_matrix(d.measurement) for d in data])
+
+    fig = plt.figure(figsize=(10, 5))
+    ax = fig.add_subplot(1, 2, 1)
+    ax.plot(ground_truth[:, 0], ground_truth[:, 1], '.')
+    ax.axis('equal')
+    ax.set_title('AMCL poses')
+
+    ax = fig.add_subplot(1, 2, 2)
+    ax.plot(measurement[:, 0], measurement[:, 1], '.')
+    ax.legend()
+    ax.axis('equal')
+    ax.set_title('Odom poses')
+
+    plt.show()
+
+
+if __name__ == '__main__':
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument('bagfile', help='input bagfile')
+
+    args = parser.parse_args()
+    main(**vars(args))

@@ -16,7 +16,8 @@ catkin_package()
 #############
 
 catkin_install_python(PROGRAMS
-  scripts/calibrate
+    scripts/calibrate
+    scripts/plot_path
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
