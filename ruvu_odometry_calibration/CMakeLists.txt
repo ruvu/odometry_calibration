@@ -27,7 +27,10 @@ include_directories(
   ${CERES_INCLUDES}
 )
 
-add_executable(calibrate++ src/main.cpp)
+add_executable(calibrate++
+  src/bag_buffer.cpp
+  src/main.cpp
+)
 target_link_libraries(calibrate++
   ${catkin_LIBRARIES}
   ${CERES_LIBRARIES}
