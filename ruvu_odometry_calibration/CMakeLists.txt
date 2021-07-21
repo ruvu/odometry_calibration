@@ -5,6 +5,7 @@ find_package(catkin REQUIRED COMPONENTS
   rosbag
   sensor_msgs
   tf2_ros
+  tf2_geometry_msgs
 )
 find_package(Ceres REQUIRED)
 
